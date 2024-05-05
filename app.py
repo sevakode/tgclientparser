@@ -1,15 +1,21 @@
+import os
 import asyncio
 import aiohttp
 import json
-from telethon import TelegramClient, events
 import logging
+from dotenv import load_dotenv
+from telethon import TelegramClient, events
+load_dotenv()  # Load environment variables from .env file
 
 logging.basicConfig(filename='bot_log.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Telegram API настройки
-api_id = 1028279
-api_hash = 'd202f2bedb4087154fcb94b85f95cb0c'
-bot_token = '6716101251:AAEPXVSIAo_rH18fTvIlgRK9mhcMX55p0xQ'
+
+
+
+api_id = os.getenv('API_ID')
+api_hash = os.getenv('API_HASH')
+bot_token = os.getenv('BOT_TOKEN')
+
 
 # Функция для загрузки данных о сессиях
 def load_sessions():
