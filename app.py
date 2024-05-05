@@ -35,7 +35,6 @@ async def send_to_webhook(webhook_url, data):
                 logging.info(f"Данные успешно отправлены на {webhook_url}")  # Замена print на logging.info
             else:
                 logging.error(f"Ошибка при отправке данных: {response.status}, Ответ: {response_text}")  # Замена print на logging.error
-
 async def monitor_account(client, expected_username, webhook_url):
     @client.on(events.NewMessage)
     async def handler(event):
