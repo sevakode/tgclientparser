@@ -173,7 +173,10 @@ cache/
 *.*.ts
 *.log
 *.session
-*session
+session/
 sessions.json
 session_*
 bot.session-journal
+.DS_Store
+bot_session.session-journal
+appb.py
