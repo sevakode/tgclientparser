@@ -173,4 +173,7 @@ cache/
 *.*.ts
 *.log
 *.session
+*session
 sessions.json
+session_*
+bot.session-journal
