@@ -5,14 +5,14 @@ import json
 import logging
 from dotenv import load_dotenv
 from telethon import TelegramClient, events, sync
+
 load_dotenv()
 logging.basicConfig(filename='bot_log.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
-admin_user_id = int(os.getenv('ADMIN_USER_ID'))
-# Функция для загрузки данных о сессиях
+
 def load_sessions():
     try:
         with open('sessions.json', 'r') as file:
@@ -20,62 +20,71 @@ def load_sessions():
     except FileNotFoundError:
         return {}
 
-# Функция для сохранения данных о сессиях
 def save_session(phone_number, username, webhook_url):
     sessions = load_sessions()
-    if phone_number in sessions:
-        # Добавляем нового бота, если его еще нет
-        if not any(bot['username'] == username for bot in sessions[phone_number]['bots']):
-            sessions[phone_number]['bots'].append({'username': username, 'webhook_url': webhook_url})
-    else:
-        # Создаем новую запись для номера телефона
-        sessions[phone_number] = {'bots': [{'username': username, 'webhook_url': webhook_url}]}
+    if phone_number not in sessions:
+        sessions[phone_number] = []
+    if not any(bot['username'] == username for bot in sessions[phone_number]):
+        sessions[phone_number].append({'username': username, 'webhook_url': webhook_url})
     with open('sessions.json', 'w') as file:
         json.dump(sessions, file)
-        
+
 async def send_to_webhook(webhook_url, data):
-    logging.info(f"Отправка данных на {webhook_url}: {data}")  # Замена print на logging.info
+    logging.info(f"Sending data to {webhook_url}: {data}")
     async with aiohttp.ClientSession() as session:
         async with session.post(webhook_url, json=data) as response:
             response_text = await response.text()
             if response.status == 200:
-                logging.info(f"Данные успешно отправлены на {webhook_url}")  # Замена print на logging.info
+                logging.info(f"Data successfully sent to {webhook_url}")
             else:
-                logging.error(f"Ошибка при отправке данных: {response.status}, Ответ: {response_text}")  # Замена print на logging.error
+                logging.error(f"Error sending data: {response.status}, Response: {response_text}")
 
-async def monitor_account(client, bots_info):
+async def monitor_account(client, phone_number):
+    sessions = load_sessions()
+    bots_info = sessions.get(phone_number, [])
+
     @client.on(events.NewMessage)
     async def handler(event):
         sender = await event.get_sender()
         sender_username = sender.username if sender else None
         for bot_info in bots_info:
             if event.is_private and sender_username == bot_info['username']:
-                data = {"from": sender_username, "text": event.message.text, "token": "your_token", "number": client.session.filename.split('_')[1]}
+                data = {"from": sender_username, "text": event.message.text, "number": client.session.filename.split('_')[1]}
                 await send_to_webhook(bot_info['webhook_url'], data)
-    await client.start()
-    print(f"Мониторинг аккаунта {client.session.filename}...")
-    await client.run_until_disconnected()
 
+    await client.start()
+    print(f"Monitoring account {client.session.filename}...")
+    await client.run_until_disconnected()
 async def start_bot():
     bot = TelegramClient('bot', api_id, api_hash)
     await bot.start(bot_token=bot_token)
-
     active_auth_requests = set()
 
-    # Загрузка и возобновление мониторинга для сохраненных сессий
     saved_sessions = load_sessions()
+    tasks = []
     for phone_number, session_info in saved_sessions.items():
-        session_name = f'session_{phone_number}'
+        session_name = f'session_{phone_number}_{session_info["username"]}'
         client = TelegramClient(session_name, api_id, api_hash)
-        asyncio.create_task(monitor_account(client, session_info["username"], session_info["webhook_url"]))
-
-    @bot.on(events.NewMessage(pattern='/add'))
+        try:
+            await client.connect()
+            if await client.is_user_authorized():
+                task = asyncio.create_task(monitor_account(client, session_info["username"], session_info["webhook_url"]))
+                tasks.append(task)
+                logging.info(f"Started monitoring {session_name}")
+            else:
+                logging.warning(f"Client {session_name} is not authorized")
+        except Exception as e:
+            logging.error(f"Failed to start session {session_name}: {str(e)}")
+    
+    await asyncio.gather(*tasks)
+    
+    bot.on(events.NewMessage(pattern='/add'))
     async def add_account_handler(event):
         try:
             split_text = event.message.text.split(maxsplit=3)
             if len(split_text) == 4:
                 _, phone_number, username, webhook_url = split_text
-                session_name = f'session_{phone_number}_{username}'
+                session_name = f'session_{phone_number}'
                 client = TelegramClient(session_name, api_id, api_hash)
                 await client.connect()
                 if not await client.is_user_authorized():
@@ -90,9 +99,9 @@ async def start_bot():
                                 try:
                                     await client.sign_in(phone_number, code)
                                     active_auth_requests.remove(phone_number)
-                                    asyncio.create_task(monitor_account(client, username, webhook_url))
                                     save_session(phone_number, username, webhook_url)
-                                    await event.respond(f'Аккаунт {phone_number} добавлен и начал мониторинг.')
+                                    asyncio.create_task(monitor_account(client, phone_number))
+                                    await event.respond(f'Бот {username} добавлен к аккаунту {phone_number} и начал мониторинг.')
                                 except Exception as e:
                                     await event.respond(f'Ошибка входа: {e}')
                                 finally:
@@ -101,20 +110,19 @@ async def start_bot():
                         await event.respond(f'Процесс аутентификации для {phone_number} уже идет.')
                 else:
                     save_session(phone_number, username, webhook_url)
-                    asyncio.create_task(monitor_account(client, username, webhook_url))
+                    asyncio.create_task(monitor_account(client, phone_number))
                     await event.respond(f'Бот {username} добавлен к аккаунту {phone_number}.')
             else:
                 await event.respond('Используйте /add <номер телефона> <username> <webhook_url>')
         except Exception as e:
             await event.respond(f'Произошла ошибка: {e}')
 
-
-    print("Бот запущен...")
+    print("Bot is running...")
     await bot.run_until_disconnected()
+
 
 if __name__ == '__main__':
     try:
         asyncio.run(start_bot())
     except Exception as e:
         logging.error(f"Fatal error in main execution: {e}")
-
