@@ -11,6 +11,8 @@ logging.basicConfig(filename='bot_log.log', level=logging.INFO, format='%(asctim
 api_id = os.getenv('API_ID')
 api_hash = os.getenv('API_HASH')
 bot_token = os.getenv('BOT_TOKEN')
+AUTH_TIMEOUT = 60  # 5 минут
+
 
 def load_sessions():
     try:
@@ -80,15 +82,18 @@ async def start_bot():
                             if code_event.message.text.isdigit():
                                 code = code_event.message.text.strip()
                                 try:
-                                    await client.sign_in(phone_number, code)
+                                    await asyncio.wait_for(client.sign_in(phone_number, code), timeout=AUTH_TIMEOUT)
                                     active_auth_requests.remove(phone_number)
                                     asyncio.create_task(monitor_account(client, username, webhook_url))
                                     save_session(phone_number, username, webhook_url)
                                     await event.respond(f'Аккаунт {phone_number} добавлен и начал мониторинг.')
+                                except asyncio.TimeoutError:
+                                    await event.respond(f'Превышено время ожидания кода аутентификации для {phone_number}. Попробуйте еще раз.')
                                 except Exception as e:
                                     await event.respond(f'Ошибка входа: {e}')
                                 finally:
                                     bot.remove_event_handler(wait_for_code)
+                                    active_auth_requests.remove(phone_number)
                     else:
                         await event.respond(f'Процесс аутентификации для {phone_number} уже идет.')
                 else:
