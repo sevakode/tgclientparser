@@ -180,3 +180,4 @@ bot.session-journal
 .DS_Store
 bot_session.session-journal
 appb.py
+tgclient/
